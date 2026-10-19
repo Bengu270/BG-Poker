@@ -144,7 +144,7 @@ def myAI(state: GameState) -> Action:
         numQuads = 0
 
 
-    print(cardRanks, cardSuits, numPairs, pairs, numTriples, numQuads, numInStraight, numSameSuit, longestSuit, highestSuitInHand)
+    # print(cardRanks, cardSuits, numPairs, pairs, numTriples, numQuads, numInStraight, numSameSuit, longestSuit, highestSuitInHand)
 
 
     if (len(communityCards)) == 0:
@@ -155,7 +155,6 @@ def myAI(state: GameState) -> Action:
             else:
                 return Action.raise_by(10)
         elif to_call > 0 and to_call < 20 and (state.my_player.chips_bet <= 20):
-            print(to_call)
             return Action.call() 
         elif to_call > 0:
             return Action.fold()
@@ -164,7 +163,7 @@ def myAI(state: GameState) -> Action:
     
     elif (len(communityCards)) == 3:
         confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (2.5*numInStraight if numInStraight >= 3 else 0) + (3 * numSameSuit if numSameSuit >= 3  and (cardSuits[0] == cardSuits[1] or highestSuitInHand >=10) else 0)
-        print(confidence)
+        # print(confidence)
 
         if (confidence <10):
             return Action.fold()
@@ -185,7 +184,7 @@ def myAI(state: GameState) -> Action:
 
     elif (len(communityCards)) == 4:
         confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (2*numInStraight if numInStraight >= 4 else 0) + (2.5 * numSameSuit if numSameSuit >= 4  and (cardSuits[0] == cardSuits[1] or highestSuitInHand >=10) else 0)
-        print(confidence)
+        # print(confidence)
         
         if (confidence <10):
             return Action.fold()
@@ -205,7 +204,7 @@ def myAI(state: GameState) -> Action:
 
     elif (len(communityCards)) == 5:
         confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (100 if numInStraight >= 5 else 0) + (100 if numSameSuit >= 5  and (cardSuits[0] == cardSuits[1] or highestSuitInHand >=10) else 0)
-        print(confidence)
+        # print(confidence)
 
         if (confidence <10):
             return Action.fold()
@@ -226,7 +225,7 @@ def myAI(state: GameState) -> Action:
     else:
         print('error, exceeded turn numbers')
 
-    print('bro')
+    # print('bro')
     return defaultAI(state)
 
 
