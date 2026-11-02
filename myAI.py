@@ -98,14 +98,12 @@ def myAI(state: GameState) -> Action:
                 numTriples += 1
             case 4:
                 numQuads += 1
-    for i in range(1, 15):
+    for i in [r for r in range(1, 15) if r not in handCardRanks]:
         match communityCardRanks.count(i):
             case 2:
                 numPairs -= 1
-                try:
+                if i in pairs:
                     pairs.remove(i)
-                except:
-                    None
             case 3:
                 numTriples -= 1
             case 4:
@@ -135,7 +133,8 @@ def myAI(state: GameState) -> Action:
             if (longestStraight > numInStraight):
                 numInStraight = longestStraight
             longestStraight = 1
-
+            
+    numInStraight = max(numInStraight, longestStraight)
     if numPairs <0:
         numPairs = 0
     if numTriples <0:
@@ -149,7 +148,7 @@ def myAI(state: GameState) -> Action:
 
     if (len(communityCards)) == 0:
 
-        if (numPairs >= 1) and (state.my_player.chips_bet <= 50):
+        if (numPairs >= 1 or min(handCardRanks) >= 11) and (state.my_player.chips_bet <= 50):
             if max(pairs, default=0) >=10:
                 return Action.raise_by(25)
             else:
@@ -162,17 +161,21 @@ def myAI(state: GameState) -> Action:
             return Action.check()
     
     elif (len(communityCards)) == 3:
-        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (2.5*numInStraight if numInStraight >= 3 else 0) + (3 * numSameSuit if numSameSuit >= 3  and (cardSuits[0] == cardSuits[1] or highestSuitInHand >=10) else 0)
+        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (100 if numInStraight >= 5 else (12 if numInStraight == 4 else 0)) + (100 if numSameSuit >= 5 else (15 if numSameSuit == 4 and (cardSuits[0] == cardSuits[1] or highestSuitInHand >= 10) else 0))
         # print(confidence)
 
         if (confidence <10):
-            return Action.fold()
+            return Action.check() if to_call == 0 else Action.fold()
         elif (confidence >= 50):
             if True: # (state.my_player.chips_bet <= 50):
-                return Action.raise_by(state.chips_in_pot // 2)
+                if(state.chips_in_pot // 2 <= 50):
+                    return Action.raise_by(50)
+                else:
+                    return Action.raise_by(state.chips_in_pot // 2)
         elif (confidence >= 20):
-            if (state.my_player.chips_bet <= 50):
+            if state.my_player.chips_bet <= 50 and to_call <= 40:
                 return Action.raise_by(20)
+            return Action.call() if to_call > 0 else Action.check()
         else:
             if to_call > 0 and to_call < 20 and (state.my_player.chips_bet <= 20 or confidence >= 20):
                 return Action.call() 
@@ -183,17 +186,20 @@ def myAI(state: GameState) -> Action:
             
 
     elif (len(communityCards)) == 4:
-        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (2*numInStraight if numInStraight >= 4 else 0) + (2.5 * numSameSuit if numSameSuit >= 4  and (cardSuits[0] == cardSuits[1] or highestSuitInHand >=10) else 0)
-        # print(confidence)
+        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (100 if numInStraight >= 5 else (10 if numInStraight == 4 else 0)) + (100 if numSameSuit >= 5 else (12 if numSameSuit == 4 and (cardSuits[0] == cardSuits[1] or highestSuitInHand >= 10) else 0))
         
         if (confidence <10):
-            return Action.fold()
+            return Action.check() if to_call == 0 else Action.fold()
         elif (confidence >= 50):
             if True: #  (state.my_player.chips_bet <= 50):
-                return Action.raise_by(state.chips_in_pot // 2)
+                if(state.chips_in_pot // 2 <= 50):
+                    return Action.raise_by(50)
+                else:
+                    return Action.raise_by(state.chips_in_pot // 2)
         elif (confidence >= 20):
-            if (state.my_player.chips_bet <= 50):
+            if state.my_player.chips_bet <= 50 and to_call <= 40:
                     return Action.raise_by(20)
+            return Action.call() if to_call > 0 else Action.check()
         else:
             if to_call > 0 and to_call < 20 and (state.my_player.chips_bet <= 20 or confidence >= 20):
                 return Action.call() 
@@ -203,17 +209,21 @@ def myAI(state: GameState) -> Action:
                 return Action.check()
 
     elif (len(communityCards)) == 5:
-        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (100 if numInStraight >= 5 else 0) + (100 if numSameSuit >= 5  and (cardSuits[0] == cardSuits[1] or highestSuitInHand >=10) else 0)
+        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (100 if numInStraight >= 5 else 0) + (100 if numSameSuit >= 5 else 0)
         # print(confidence)
 
         if (confidence <10):
-            return Action.fold()
+            return Action.check() if to_call == 0 else Action.fold()
         elif (confidence >= 50):
             if True: #  (state.my_player.chips_bet <= 50):
-                return Action.raise_by(state.chips_in_pot // 2)
+                if(state.chips_in_pot // 2 <= 50):
+                    return Action.raise_by(50)
+                else:
+                    return Action.raise_by(state.chips_in_pot // 2)
         elif (confidence >= 20):
-            if (state.my_player.chips_bet <= 50):
+            if state.my_player.chips_bet <= 50 and to_call <= 40:
                 return Action.raise_by(20)
+            return Action.call() if to_call > 0 else Action.check()
         else:
             if to_call > 0 and to_call < 20 and (state.my_player.chips_bet <= 20 or confidence >= 20):
                 return Action.call() 
