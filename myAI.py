@@ -1,11 +1,10 @@
 from poker.action import Action
 from poker.game_state import GameState
-
-import numpy as np
+import math
+import random
 
 RANKS = {name: i for i, name in enumerate('one two three four five six seven eight nine ten jack queen king ace'.split(), 1)}
 SUITS = ['club', 'diamond', 'heart', 'spade']
-rng = np.random.default_rng()
 preCache = {}
 
 
@@ -55,7 +54,7 @@ def chenScore(card1, card2):
         return max(5.0, 2 * value(hi))
     gap = hi - lo - 1
     score = value(hi) + (2 if card1[1] == card2[1] else 0) - {0: 0, 1: 1, 2: 2, 3: 4}.get(gap, 5)
-    return float(np.ceil(score + (1 if gap <= 1 and hi < 12 else 0)))
+    return float(math.ceil(score + (1 if gap <= 1 and hi < 12 else 0)))
 
 
 def calcEquity(hand, board, numOpp, numSims, rangeThr=None):
@@ -65,14 +64,15 @@ def calcEquity(hand, board, numOpp, numSims, rangeThr=None):
     numOpp = max(1, min(numOpp, (len(deck) - needBoard) // 2))
     score = 0.0
     for _ in range(numSims):
-        perm = rng.permutation(len(deck))
+        need = needBoard + 2 * numOpp
+        cards = random.sample(deck, max(need, 40) if rangeThr is not None else need)
         if rangeThr is not None:
             for i in range(0, 40, 2):
-                if chenScore(deck[perm[i]], deck[perm[i + 1]]) >= rangeThr:
-                    perm[0], perm[i] = perm[i], perm[0]
-                    perm[1], perm[i + 1] = perm[i + 1], perm[1]
+                if chenScore(cards[i], cards[i + 1]) >= rangeThr:
+                    cards[0], cards[i] = cards[i], cards[0]
+                    cards[1], cards[i + 1] = cards[i + 1], cards[1]
                     break
-        drawn = [deck[i] for i in perm[:needBoard + 2 * numOpp]]
+        drawn = cards[:need]
         fullBoard = list(board) + drawn[2 * numOpp:]
         myScore = evaluateHand(list(hand) + fullBoard)
         bestOpp = max(evaluateHand(drawn[2 * i:2 * i + 2] + fullBoard) for i in range(numOpp))
