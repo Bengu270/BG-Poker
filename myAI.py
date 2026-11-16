@@ -1,246 +1,176 @@
 from poker.action import Action
 from poker.game_state import GameState
 
+import numpy as np
+
+RANKS = {name: i for i, name in enumerate('one two three four five six seven eight nine ten jack queen king ace'.split(), 1)}
+SUITS = ['club', 'diamond', 'heart', 'spade']
+rng = np.random.default_rng()
+preCache = {}
+
+
+def parseCard(card):
+    return (RANKS[str(card.rank.value).lower()], str(card.suit.value).lower())
+
+
+def straightHigh(ranks):
+    ranks = set(ranks) | ({1} if 14 in ranks else set())
+    return next((high for high in range(14, 4, -1) if all(high - k in ranks for k in range(5))), 0)
+
+
+def evaluateHand(cards):
+    counts = {}
+    for rank, suit in cards:
+        counts[rank] = counts.get(rank, 0) + 1
+    groups = sorted(counts, key=lambda rank: (counts[rank], rank), reverse=True)
+    flush = None
+    for suit in SUITS:
+        suited = sorted((rank for rank, s in cards if s == suit), reverse=True)
+        if len(suited) >= 5:
+            flush = suited
+            if straightHigh(suited):
+                return (8, straightHigh(suited))
+    top, second = counts[groups[0]], counts[groups[1]] if len(groups) > 1 else 0
+    if top == 4:
+        return (7, groups[0], max(groups[1:]))
+    if top == 3 and second >= 2:
+        return (6, groups[0], groups[1])
+    if flush:
+        return (5,) + tuple(flush[:5])
+    if straightHigh(groups):
+        return (4, straightHigh(groups))
+    if top == 3:
+        return (3, groups[0]) + tuple(sorted(groups[1:], reverse=True)[:2])
+    if top == 2 and second == 2:
+        return (2, groups[0], groups[1], max(groups[2:]))
+    if top == 2:
+        return (1, groups[0]) + tuple(sorted(groups[1:], reverse=True)[:3])
+    return (0,) + tuple(sorted(groups, reverse=True)[:5])
+
+
+def chenScore(card1, card2):
+    value = lambda rank: {14: 10, 13: 8, 12: 7, 11: 6}.get(rank, rank / 2.0)
+    hi, lo = max(card1[0], card2[0]), min(card1[0], card2[0])
+    if hi == lo:
+        return max(5.0, 2 * value(hi))
+    gap = hi - lo - 1
+    score = value(hi) + (2 if card1[1] == card2[1] else 0) - {0: 0, 1: 1, 2: 2, 3: 4}.get(gap, 5)
+    return float(np.ceil(score + (1 if gap <= 1 and hi < 12 else 0)))
+
+
+def calcEquity(hand, board, numOpp, numSims, rangeThr=None):
+    known = set(hand) | set(board)
+    deck = [(rank, suit) for rank in range(2, 15) for suit in SUITS if (rank, suit) not in known]
+    needBoard = 5 - len(board)
+    numOpp = max(1, min(numOpp, (len(deck) - needBoard) // 2))
+    score = 0.0
+    for _ in range(numSims):
+        perm = rng.permutation(len(deck))
+        if rangeThr is not None:
+            for i in range(0, 40, 2):
+                if chenScore(deck[perm[i]], deck[perm[i + 1]]) >= rangeThr:
+                    perm[0], perm[i] = perm[i], perm[0]
+                    perm[1], perm[i + 1] = perm[i + 1], perm[1]
+                    break
+        drawn = [deck[i] for i in perm[:needBoard + 2 * numOpp]]
+        fullBoard = list(board) + drawn[2 * numOpp:]
+        myScore = evaluateHand(list(hand) + fullBoard)
+        bestOpp = max(evaluateHand(drawn[2 * i:2 * i + 2] + fullBoard) for i in range(numOpp))
+        score += 1.0 if myScore > bestOpp else 0.5 if myScore == bestOpp else 0.0
+    return score / numSims
+
 
 def myAI(state: GameState) -> Action:
-    hand = state.my_player.hole_cards
-    communityCards = state.community_cards
-    handCardRanks = []
-    communityCardRanks = []
-    handCardSuits = []
-    communityCardSuits = []
-    for item in hand:
-        match item.rank.value:
-            case 'one':
-                handCardRanks.append(1)
-            case 'two':
-                handCardRanks.append(2)
-            case 'three':
-                handCardRanks.append(3)
-            case 'four':
-                handCardRanks.append(4)
-            case 'five':
-                handCardRanks.append(5)     
-            case 'six':
-                handCardRanks.append(6)
-            case 'seven':
-                handCardRanks.append(7)
-            case 'eight':
-                handCardRanks.append(8)
-            case 'nine':
-                handCardRanks.append(9)
-            case 'ten':
-                handCardRanks.append(10)
-            case 'jack':
-                handCardRanks.append(11)
-            case 'queen':
-                handCardRanks.append(12)
-            case 'king':
-                handCardRanks.append(13)
-            case 'ace':
-                handCardRanks.append(14)
+    me = state.my_player
+    bigBlind = max(state.big_blind, 1)
+    hand = [parseCard(c) for c in me.hole_cards]
+    board = [parseCard(c) for c in state.community_cards]
+    pot = max(int(state.chips_in_pot), 0)
+    maxBet = max(player.chips_bet for player in state.players)
+    toCall = max(0, maxBet - me.chips_bet)
+    leftAfterCalling = me.chips_in_stack - toCall
+    others = [player for player in state.players if player is not me and not player.has_folded]
+    canBeCalled = any(player.chips_in_stack > 0 for player in others)
+    numOpp = max(1, len(others))
+    totalStack = me.chips_in_stack + me.chips_bet
+    bigBlinds = totalStack / bigBlind
+    raised = toCall > bigBlind
+    myShare = totalStack / max(sum(player.chips_in_stack + player.chips_bet for player in state.players), 1)
+    requiredEquity = toCall / (pot + toCall) if toCall > 0 else 0.0
 
-        handCardSuits.append(item.suit.value)
-    for item in communityCards:
-            match item.rank.value:
-                case 'one':
-                    communityCardRanks.append(1)
-                case 'two':
-                    communityCardRanks.append(2)
-                case 'three':
-                    communityCardRanks.append(3)
-                case 'four':
-                    communityCardRanks.append(4)
-                case 'five':
-                    communityCardRanks.append(5)     
-                case 'six':
-                    communityCardRanks.append(6)
-                case 'seven':
-                    communityCardRanks.append(7)
-                case 'eight':
-                    communityCardRanks.append(8)
-                case 'nine':
-                    communityCardRanks.append(9)
-                case 'ten':
-                    communityCardRanks.append(10)
-                case 'jack':
-                    communityCardRanks.append(11)
-                case 'queen':
-                    communityCardRanks.append(12)
-                case 'king':
-                    communityCardRanks.append(13)
-                case 'ace':
-                    communityCardRanks.append(14)
+    rangeThr = None
+    raiser = max(state.players, key=lambda player: player.chips_bet)
+    if not board and raised and raiser is not me:
+        raiserBigBlinds = (raiser.chips_in_stack + raiser.chips_bet) / bigBlind
+        rangeThr = 2.0 if raiserBigBlinds < 10 else 3.0 if toCall <= 4 * bigBlind else 5.0 if toCall <= 10 * bigBlind else 7.0
 
-            communityCardSuits.append(item.suit.value)
-
-    cardRanks = handCardRanks + communityCardRanks
-    cardSuits = handCardSuits + communityCardSuits
-
-
-    suits = ['club', 'diamond', 'heart', 'spade']
-
-    to_call = max(player.chips_bet for player in state.players) - state.my_player.chips_bet
-
-    numPairs = 0
-    pairs = []
-    numTriples = 0
-    numQuads = 0
-    numSameSuit = 0
-    numInStraight = 0
-
-    for i in range(1, 15):
-        match cardRanks.count(i):
-            case 2:
-                numPairs += 1
-                pairs.append(i)
-            case 3:
-                numTriples += 1
-            case 4:
-                numQuads += 1
-    for i in [r for r in range(1, 15) if r not in handCardRanks]:
-        match communityCardRanks.count(i):
-            case 2:
-                numPairs -= 1
-                if i in pairs:
-                    pairs.remove(i)
-            case 3:
-                numTriples -= 1
-            case 4:
-                numQuads -= 1
-
-    longestSuit = ''
-    for suit in suits:
-        suitCount = cardSuits.count(suit)
-        if suitCount > numSameSuit and (suit in handCardSuits):
-            numSameSuit = suitCount
-            longestSuit = suit
-
-    highestSuitInHand = 0
-    if cardSuits[0] == longestSuit:
-        highestSuitInHand = cardRanks[0]
-    if cardSuits[1] == longestSuit:
-        if cardRanks[1] > highestSuitInHand:
-            highestSuitInHand = cardRanks[1]
-
-    cardRanks.sort()
-    cardRanks = list(dict.fromkeys(cardRanks))
-    longestStraight = 1
-    for i in range(len(cardRanks)-1):
-        if (cardRanks[i] + 1) == (cardRanks[i+1]):
-            longestStraight += 1
-        else:
-            if (longestStraight > numInStraight):
-                numInStraight = longestStraight
-            longestStraight = 1
-            
-    numInStraight = max(numInStraight, longestStraight)
-    if numPairs <0:
-        numPairs = 0
-    if numTriples <0:
-        numTriples = 0
-    if numQuads <0:
-        numQuads = 0
-
-
-    # print(cardRanks, cardSuits, numPairs, pairs, numTriples, numQuads, numInStraight, numSameSuit, longestSuit, highestSuitInHand)
-
-
-    if (len(communityCards)) == 0:
-
-        if (numPairs >= 1 or min(handCardRanks) >= 11) and (state.my_player.chips_bet <= 50):
-            if max(pairs, default=0) >=10:
-                return Action.raise_by(25)
-            else:
-                return Action.raise_by(10)
-        elif to_call > 0 and to_call < 20 and (state.my_player.chips_bet <= 20):
-            return Action.call() 
-        elif to_call > 0:
-            return Action.fold()
-        else:
-            return Action.check()
-    
-    elif (len(communityCards)) == 3:
-        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (100 if numInStraight >= 5 else (12 if numInStraight == 4 else 0)) + (100 if numSameSuit >= 5 else (15 if numSameSuit == 4 and (cardSuits[0] == cardSuits[1] or highestSuitInHand >= 10) else 0))
-        # print(confidence)
-
-        if (confidence <10):
-            return Action.check() if to_call == 0 else Action.fold()
-        elif (confidence >= 50):
-            if True: # (state.my_player.chips_bet <= 50):
-                if(state.chips_in_pot // 2 <= 50):
-                    return Action.raise_by(50)
-                else:
-                    return Action.raise_by(state.chips_in_pot // 2)
-        elif (confidence >= 20):
-            if state.my_player.chips_bet <= 50 and to_call <= 40:
-                return Action.raise_by(20)
-            return Action.call() if to_call > 0 else Action.check()
-        else:
-            if to_call > 0 and to_call < 20 and (state.my_player.chips_bet <= 20 or confidence >= 20):
-                return Action.call() 
-            elif to_call > 0:
-                return Action.fold()
-            else:
-                return Action.check()
-            
-
-    elif (len(communityCards)) == 4:
-        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (100 if numInStraight >= 5 else (10 if numInStraight == 4 else 0)) + (100 if numSameSuit >= 5 else (12 if numSameSuit == 4 and (cardSuits[0] == cardSuits[1] or highestSuitInHand >= 10) else 0))
-        
-        if (confidence <10):
-            return Action.check() if to_call == 0 else Action.fold()
-        elif (confidence >= 50):
-            if True: #  (state.my_player.chips_bet <= 50):
-                if(state.chips_in_pot // 2 <= 50):
-                    return Action.raise_by(50)
-                else:
-                    return Action.raise_by(state.chips_in_pot // 2)
-        elif (confidence >= 20):
-            if state.my_player.chips_bet <= 50 and to_call <= 40:
-                    return Action.raise_by(20)
-            return Action.call() if to_call > 0 else Action.check()
-        else:
-            if to_call > 0 and to_call < 20 and (state.my_player.chips_bet <= 20 or confidence >= 20):
-                return Action.call() 
-            elif to_call > 0:
-                return Action.fold()
-            else:
-                return Action.check()
-
-    elif (len(communityCards)) == 5:
-        confidence = 10*numPairs + max(pairs, default=0) + 50*numTriples + 100*numQuads + (100 if numInStraight >= 5 else 0) + (100 if numSameSuit >= 5 else 0)
-        # print(confidence)
-
-        if (confidence <10):
-            return Action.check() if to_call == 0 else Action.fold()
-        elif (confidence >= 50):
-            if True: #  (state.my_player.chips_bet <= 50):
-                if(state.chips_in_pot // 2 <= 50):
-                    return Action.raise_by(50)
-                else:
-                    return Action.raise_by(state.chips_in_pot // 2)
-        elif (confidence >= 20):
-            if state.my_player.chips_bet <= 50 and to_call <= 40:
-                return Action.raise_by(20)
-            return Action.call() if to_call > 0 else Action.check()
-        else:
-            if to_call > 0 and to_call < 20 and (state.my_player.chips_bet <= 20 or confidence >= 20):
-                return Action.call() 
-            elif to_call > 0:
-                return Action.fold()
-            else:
-                return Action.check()
-
+    if not board and rangeThr is None:
+        (rank1, suit1), (rank2, suit2) = hand
+        cacheKey = (max(rank1, rank2), min(rank1, rank2), suit1 == suit2 and rank1 != rank2, numOpp)
+        if cacheKey not in preCache:
+            preCache[cacheKey] = calcEquity(hand, board, numOpp, 1500)
+        eq = preCache[cacheKey]
     else:
-        print('error, exceeded turn numbers')
+        baseSims = 500 if numOpp <= 2 else 350
+        eq = calcEquity(hand, board, numOpp, baseSims, rangeThr)
+        if toCall > 0 and abs(eq - requiredEquity) < 0.06:
+            eq = (eq * baseSims + calcEquity(hand, board, numOpp, 900, rangeThr) * 900) / (baseSims + 900)
 
-    # print('bro')
-    return defaultAI(state)
+    penalty = min(0.14, 0.04 + 0.08 * toCall / max(me.chips_in_stack, 1) + 0.08 * toCall / max(pot, 1)) if board and toCall > 0 else 0.0
+    effEq = max(0.0, eq - penalty)
+    ratio = effEq * (numOpp + 1)
+    fair = 1.0 / (numOpp + 1)
+    strength = (effEq - fair) / (1.0 - fair)
 
+    def bet(chips):
+        if leftAfterCalling <= 0 or not canBeCalled:
+            return Action.check() if toCall == 0 else Action.call()
+        return Action.raise_by(min(max(int(chips), bigBlind), leftAfterCalling))
 
-def defaultAI(state: GameState) -> Action: # This ai runs if myAI raises an exception, returns an invalid action or takes too long
-    return Action.check() if state.my_player.chips_bet == max(player.chips_bet for player in state.players) else Action.fold()
+    shove = bet(leftAfterCalling)
 
+    callMargin = 0.06 if leftAfterCalling <= 0 and bigBlinds > 12 else 0.03
+    if myShare >= 0.5 and toCall >= 0.3 * me.chips_in_stack:
+        callMargin += 0.03
+    if toCall == 0:
+        fallback = Action.check()
+    elif effEq > requiredEquity + callMargin and (ratio >= 1.0 or rangeThr is not None):
+        fallback = Action.call()
+    elif toCall <= 0.08 * (pot + toCall) and effEq >= requiredEquity:
+        fallback = Action.call()
+    else:
+        fallback = Action.fold()
 
+    if not board:
+        if bigBlinds < 10:
+            if not raised:
+                return shove if bigBlinds <= 5 or ratio >= 0.9 else fallback
+            if effEq > requiredEquity + 0.01:
+                return Action.call() if effEq < 0.62 else shove
+            return Action.fold()
+        if not raised:
+            if strength >= 0.5:
+                return bet(4 * bigBlind - maxBet) if bigBlinds > 30 else shove
+            if strength >= (0.15 if numOpp == 1 else 0.22):
+                return bet(3 * bigBlind - maxBet)
+            return fallback
+        if effEq >= 0.66:
+            return shove if bigBlinds <= 40 else bet(pot)
+        return fallback
+
+    spr = leftAfterCalling / max(pot, 1)
+    if toCall == 0:
+        if spr <= 1.0 and strength >= 0.3:
+            return shove
+        for minStrength, fraction in [(0.72, 1.0), (0.55, 0.7), (0.35, 0.45)]:
+            if strength >= minStrength:
+                return bet(pot * fraction)
+        return fallback
+    if spr <= 1.5 and effEq > requiredEquity + 0.02 and ratio >= 1.2:
+        return shove if strength >= 0.45 else Action.call()
+    if strength >= 0.65 and toCall <= pot:
+        return bet(pot * 0.75)
+    return fallback
+
+ 
 # Re-commit - Freddie
